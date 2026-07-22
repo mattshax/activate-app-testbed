@@ -122,14 +122,28 @@ permissions:
                 label: Account
                 type: slurm-accounts
                 resource: ${{ inputs.workers.[index].resource }}
+              qos:
+                label: QoS
+                type: slurm-qos
+                resource: ${{ inputs.workers.[index].resource }}
+                optional: true
+              cpus_per_task:
+                label: CPUs per task
+                type: number
+                default: 1
+                tooltip: CPUs for the worker job (--cpus-per-task)
               time:
                 label: Walltime
                 type: string
                 default: "01:00:00"
-              extra:
-                label: Extra sbatch args
-                type: string
-                default: ""
+              scheduler_directives:
+                label: Additional directives
+                type: editor
+                optional: true
+                tooltip: |
+                  Extra SLURM directives inserted into the batch script
+                  verbatim; include the #SBATCH prefix on each line.
+                default: "##SBATCH --constraint=mla  # uncomment for Navy and AFRL DSRC systems"
           pbs:
             label: PBS directives
             type: group
@@ -356,7 +370,7 @@ jobs:
           BOOT_B64=$(base64 -w0 <<'WBOOTEOF'
           set -e
           PORT=$1; SRV_RES=$2; WNAME=$3; ROOT_IN=$4
-          SCHED=${5:-none}; PQ=${6:-}; ACCT=${7:-}; WT=${8:-}; EXTRA=${9:-}; TMETHOD=${10:-auto}; IS_LOCAL=${11:-}; SRV_USER=${12:-}; PBS_B64=${13:-}; PW_USER=${14:-}
+          SCHED=${5:-none}; PQ=${6:-}; ACCT=${7:-}; WT=${8:-}; QOS=${9:-}; TMETHOD=${10:-auto}; IS_LOCAL=${11:-}; SRV_USER=${12:-}; DIR_B64=${13:-}; PW_USER=${14:-}; CPT=${15:-}
           ROOT=$(eval echo "$ROOT_IN")
           mkdir -p "$ROOT"
           health() { curl -sf -m 3 -o /dev/null "http://127.0.0.1:$PORT/health"; }
@@ -482,10 +496,11 @@ jobs:
             cat > "$ROOT/worker-job.sh" <<JOBEOF
           #!/bin/bash
           JOBEOF
-            # PBS reads directives from the script; slurm directives stay
-            # on the sbatch command line
-            if [ "$SCHED" = "pbs" ] && [ -n "$PBS_B64" ]; then
-              echo "$PBS_B64" | base64 -d >> "$ROOT/worker-job.sh"
+            # both schedulers read directives embedded in the script; the
+            # picker-driven options ride the submit command line and
+            # override these where they overlap
+            if [ -n "$DIR_B64" ]; then
+              echo "$DIR_B64" | base64 -d >> "$ROOT/worker-job.sh"
             fi
             cat >> "$ROOT/worker-job.sh" <<JOBEOF
           set -e
@@ -526,8 +541,9 @@ jobs:
               CMD=(sbatch --job-name="$JOBNAME" --output="$ROOT/worker-job.log" --nodes=1)
               [ -n "$PQ" ] && CMD+=(--partition="$PQ")
               [ -n "$ACCT" ] && CMD+=(--account="$ACCT")
+              [ -n "$QOS" ] && CMD+=(--qos="$QOS")
+              [ -n "$CPT" ] && CMD+=(--cpus-per-task="$CPT")
               [ -n "$WT" ] && CMD+=(--time="$WT")
-              [ -n "$EXTRA" ] && CMD+=($EXTRA)
             else
               # -V exports the submit environment into the job. Queue,
               # walltime etc. come from the #PBS lines embedded in the
@@ -626,13 +642,15 @@ jobs:
                       print("WARNING: %s: scheduler requested but schedulerType is %r; running unscheduled" % (name, st), file=sys.stderr)
               sl = w.get("slurm") or {}
               pb = w.get("pbs") or {}
-              pq = acct = wt = extra = pbsd = ""
+              pq = acct = wt = qos = cpt = dirs = ""
               if sched == "slurm":
-                  pq, acct, wt, extra = sl.get("partition") or "", sl.get("account") or "", sl.get("time") or "", sl.get("extra") or ""
+                  pq, acct, wt = sl.get("partition") or "", sl.get("account") or "", sl.get("time") or ""
+                  qos, cpt = sl.get("qos") or "", str(sl.get("cpus_per_task") or "")
+                  dirs = base64.b64encode((sl.get("scheduler_directives") or "").encode()).decode()
               elif sched == "pbs":
                   acct = pb.get("account") or ""
-                  pbsd = base64.b64encode((pb.get("scheduler_directives") or "").encode()).decode()
-              print(chr(31).join([name, w.get("worker_name") or "", w.get("workdir") or "~/app-testbed-worker", sched, pq, acct, wt, extra, pbsd]))
+                  dirs = base64.b64encode((pb.get("scheduler_directives") or "").encode()).decode()
+              print(chr(31).join([name, w.get("worker_name") or "", w.get("workdir") or "~/app-testbed-worker", sched, pq, acct, wt, qos, dirs, cpt]))
           ' > "$TSV"
           if [ ! -s "$TSV" ]; then
             echo "no worker sites configured; nothing to do"
@@ -660,7 +678,7 @@ jobs:
           FAILED=""
           # unit-separator delimiter: tab is IFS whitespace and collapses
           # empty fields, which would drop a blank worker_name
-          while IFS="$(printf '\037')" read -r NAME WNAME WD SCHED PQ ACCT WT EXTRA PBSD; do
+          while IFS="$(printf '\037')" read -r NAME WNAME WD SCHED PQ ACCT WT QOS DIRS CPT; do
             [ -n "$NAME" ] || continue
             echo ""
             echo "=== dispatching worker to $NAME (scheduler=$SCHED) ==="
@@ -669,7 +687,7 @@ jobs:
             # PATH on the remote side.
             LOCAL=""
             [ "$NAME" = "$SRV_RES" ] && LOCAL=1
-            if OUT=$(pw ssh "$NAME" "export PW_API_KEY='$PW_API_KEY' PW_PLATFORM_HOST='$PW_PLATFORM_HOST'; echo $BOOT_B64 | base64 -d | bash -ls -- '$PORT' '$SRV_RES' '$WNAME' '$WD' '$SCHED' '$PQ' '$ACCT' '$WT' '$EXTRA' '$TMETHOD' '$LOCAL' '$SRV_USER' '$PBSD' '$PW_USER'" 2>&1); then
+            if OUT=$(pw ssh "$NAME" "export PW_API_KEY='$PW_API_KEY' PW_PLATFORM_HOST='$PW_PLATFORM_HOST'; echo $BOOT_B64 | base64 -d | bash -ls -- '$PORT' '$SRV_RES' '$WNAME' '$WD' '$SCHED' '$PQ' '$ACCT' '$WT' '$QOS' '$TMETHOD' '$LOCAL' '$SRV_USER' '$DIRS' '$PW_USER' '$CPT'" 2>&1); then
               echo "$OUT"
               JOBID=$(echo "$OUT" | grep -a 'SUBMITTED_JOBID=' | grep -oE 'SUBMITTED_JOBID=[0-9]+' | head -1 | cut -d= -f2)
               JOBLOG=$(echo "$OUT" | grep -a 'JOBLOG=' | grep -oE 'JOBLOG=[^ ]+' | head -1 | cut -d= -f2)
