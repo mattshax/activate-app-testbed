@@ -3,7 +3,7 @@
 # follow it to completion, and print the dispatch log. Set PW_CONTEXT to
 # override the pw context.
 #
-# Usage: scripts/run-worker.sh [inputs.json] [workflow-name]
+# Usage: scripts/manual/run-worker.sh [inputs.json] [workflow-name]
 set -e
 INPUTS=${1:-$(dirname "$0")/worker-inputs.json}
 WORKFLOW=${2:-app-testbed}
@@ -13,7 +13,7 @@ PW="pw${PW_CONTEXT:+ --context $PW_CONTEXT}"
 if grep -qE "OWNER|REPLACE" "$INPUTS"; then
   echo "ERROR: $INPUTS still contains placeholders."
   echo "Regenerate it for your clusters with:"
-  echo "  $(dirname "$0")/launch-worker.py --server-host <cluster> --site <cluster> --print-inputs > $INPUTS"
+  echo "  $(dirname "$0")/../programmatic/launch-worker.py --server-host <cluster> --site <cluster> --print-inputs > $INPUTS"
   exit 1
 fi
 
