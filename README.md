@@ -31,25 +31,42 @@ pw workflows create --yaml workflow.yaml app-testbed   # first time
 pw workflows update --yaml workflow.yaml app-testbed   # after edits
 ```
 
-`launch-worker.py` targets the published `app-testbed` by default; pass
+`scripts/launch-worker.py` targets the published `app-testbed` by default; pass
 `--workflow ./workflow.yaml` to run the local file without publishing.
+
+## Manual launch from a static inputs file
+
+`scripts/worker-inputs.json` is a template inputs file for running the
+testbed with the pw CLI alone. Fill in the `resource` blocks for your
+clusters (or regenerate the file with
+`scripts/launch-worker.py --server-host <cluster> --site <cluster> --print-inputs`),
+then:
+
+```bash
+scripts/run-worker.sh                # uses scripts/worker-inputs.json
+scripts/run-worker.sh my-inputs.json # or an explicit file
+```
+
+The script submits the run, follows it to completion, and prints the
+dispatch log; it refuses to launch while the template placeholders are
+still present.
 
 ## Programmatic launch
 
-`launch-worker.py` submits a run through the pw CLI and follows it to
+`scripts/launch-worker.py` submits a run through the pw CLI and follows it to
 completion, so the testbed can be driven from scripts or CI:
 
 ```bash
 # server plus one worker on another cluster
-./launch-worker.py --server-host clusterA --site clusterB
+scripts/launch-worker.py --server-host clusterA --site clusterB
 
 # workers on two sites, submitted as SLURM batch jobs
-./launch-worker.py --server-host clusterA --site clusterB --site clusterC \
+scripts/launch-worker.py --server-host clusterA --site clusterB --site clusterC \
     --scheduler --partition debug --walltime 00:30:00
 
 # verify a pw CLI release passes websocket upgrades through pw forward:
 # exit code 0 means workers connected through the tunnel
-./launch-worker.py --server-host clusterA --site clusterB \
+scripts/launch-worker.py --server-host clusterA --site clusterB \
     --tunnel-method pw-forward
 ```
 
