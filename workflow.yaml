@@ -567,8 +567,17 @@ jobs:
             exit 1
           fi
           if pgrep -f "worker.py 127.0.0.1 $PORT $WNAME" >/dev/null; then
-            echo "worker already running (pid $(pgrep -f "worker.py 127.0.0.1 $PORT $WNAME" | head -1))"
-            exit 0
+            # a running process is not enough: a server restart empties the
+            # registry and strands the worker on a dead websocket (the
+            # worker does not reconnect on its own)
+            CONN=$(curl -s -m 5 "http://127.0.0.1:$PORT/workers" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if d.get(sys.argv[1],{}).get('connected') else 'no')" "$WNAME" 2>/dev/null)
+            if [ "$CONN" = "yes" ]; then
+              echo "worker already running and connected (pid $(pgrep -f "worker.py 127.0.0.1 $PORT $WNAME" | head -1))"
+              exit 0
+            fi
+            echo "worker process exists but is not connected; restarting it"
+            pkill -f "worker.py 127.0.0.1 $PORT $WNAME" || true
+            sleep 1
           fi
           # restart until the Connected line appears; a transient tunnel
           # blip would otherwise strand the first attempt
