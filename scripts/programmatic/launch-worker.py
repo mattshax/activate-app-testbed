@@ -81,12 +81,20 @@ def pbs_directives(a):
     return "\n".join(lines) + "\n"
 
 
+def sbatch_directives(a):
+    if not a.extra:
+        return ""
+    return (a.extra if a.extra.lstrip().startswith("#SBATCH") else "#SBATCH " + a.extra) + "\n"
+
+
 def build_inputs(a, server_res, site_resources):
     workers = [{"resource": res,
                 "worker_name": a.worker_name if len(site_resources) == 1 else "",
                 "workdir": a.worker_workdir, "scheduler": a.scheduler,
-                "slurm": {"partition": a.partition, "account": a.account,
-                          "time": a.walltime, "extra": a.extra},
+                "slurm": {"partition": a.partition, "account": a.account, "qos": a.qos,
+                              "cpus_per_task": a.cpus_per_task,
+                          "time": a.walltime,
+                              "scheduler_directives": sbatch_directives(a)},
                 "pbs": {"account": a.account,
                         "scheduler_directives": pbs_directives(a)}}
                for res in site_resources]
@@ -182,8 +190,10 @@ def main():
     arg("--scheduler", action="store_true", help="submit workers as batch jobs")
     arg("--partition", default="", help="SLURM partition / PBS queue")
     arg("--account", default="")
+    arg("--qos", default="")
+    arg("--cpus-per-task", type=int, default=1)
     arg("--walltime", default="01:00:00")
-    arg("--extra", default="", help="extra sbatch args / extra #PBS directive")
+    arg("--extra", default="", help="extra #SBATCH/#PBS directive line")
     arg("--pbs-directives", default="", help="verbatim #PBS lines (replaces the generated ones)")
     arg("--no-deploy-server", dest="deploy_server", action="store_false", default=True)
     arg("--restart", action="store_true", help="restart the server if already running")

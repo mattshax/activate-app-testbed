@@ -138,8 +138,9 @@ tunnel or scheduler problems reproduce here with the same symptoms.
 - **Worker sites** - a list; one worker per entry. Each entry has an
   optional name (blank = `worker-<hostname>`), a working directory, and
   a **Submit via scheduler?** toggle with per-scheduler directive
-  groups shown based on the resource's scheduler type: partition/account
-  pickers, walltime and extra args for SLURM; an account string (`-A`)
+  groups shown based on the resource's scheduler type: partition,
+  account and QoS pickers, CPUs per task, walltime, and an additional
+  `#SBATCH` directives editor for SLURM; an account string (`-A`)
   and a free-form directives editor for PBS, whose `#PBS` lines are
   embedded verbatim in the batch script (default: debug queue, short
   walltime).
